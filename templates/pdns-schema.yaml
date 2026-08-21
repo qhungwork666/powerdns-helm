@@ -2,12 +2,11 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: {{ include "powerdns-poweradmin.fullname" . }}-pdns-schema
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "powerdns-poweradmin.labels" . | nindent 4 }}
 data:
-  schema.pgsql.sql: |
-    -- PowerDNS Authoritative generic PostgreSQL backend schema.
-    -- Keep this schema pinned with the PowerDNS major/minor version used by the chart.
+  pdns-schema.sql: |
     CREATE TABLE IF NOT EXISTS domains (
       id SERIAL PRIMARY KEY,
       name VARCHAR(255) NOT NULL,
@@ -20,7 +19,6 @@ data:
       catalog TEXT DEFAULT NULL,
       CONSTRAINT c_lowercase_name CHECK (((name)::TEXT = LOWER((name)::TEXT)))
     );
-
     CREATE UNIQUE INDEX IF NOT EXISTS name_index ON domains(name);
     CREATE INDEX IF NOT EXISTS catalog_idx ON domains(catalog);
 
@@ -38,7 +36,6 @@ data:
       CONSTRAINT domain_exists FOREIGN KEY(domain_id) REFERENCES domains(id) ON DELETE CASCADE,
       CONSTRAINT c_lowercase_name CHECK (((name)::TEXT = LOWER((name)::TEXT)))
     );
-
     CREATE INDEX IF NOT EXISTS rec_name_index ON records(name);
     CREATE INDEX IF NOT EXISTS nametype_index ON records(name,type);
     CREATE INDEX IF NOT EXISTS domain_id ON records(domain_id);
@@ -62,7 +59,6 @@ data:
       CONSTRAINT domain_exists FOREIGN KEY(domain_id) REFERENCES domains(id) ON DELETE CASCADE,
       CONSTRAINT c_lowercase_name CHECK (((name)::TEXT = LOWER((name)::TEXT)))
     );
-
     CREATE INDEX IF NOT EXISTS comments_domain_id_idx ON comments(domain_id);
     CREATE INDEX IF NOT EXISTS comments_name_type_idx ON comments(name, type);
     CREATE INDEX IF NOT EXISTS comments_order_idx ON comments(domain_id, modified_at);
@@ -73,7 +69,6 @@ data:
       kind VARCHAR(32),
       content TEXT
     );
-
     CREATE INDEX IF NOT EXISTS domainidmetaindex ON domainmetadata(domain_id);
 
     CREATE TABLE IF NOT EXISTS cryptokeys (
@@ -84,7 +79,6 @@ data:
       published BOOL DEFAULT TRUE,
       content TEXT
     );
-
     CREATE INDEX IF NOT EXISTS domainidindex ON cryptokeys(domain_id);
 
     CREATE TABLE IF NOT EXISTS tsigkeys (
@@ -94,5 +88,11 @@ data:
       secret VARCHAR(255),
       CONSTRAINT c_lowercase_name CHECK (((name)::TEXT = LOWER((name)::TEXT)))
     );
-
     CREATE UNIQUE INDEX IF NOT EXISTS namealgoindex ON tsigkeys(name, algorithm);
+
+    DO $$
+    BEGIN
+      ALTER TABLE domains ALTER COLUMN notified_serial TYPE BIGINT USING notified_serial::BIGINT;
+    EXCEPTION
+      WHEN undefined_column THEN NULL;
+    END $$;

@@ -2,15 +2,16 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "powerdns-poweradmin.fullname" . }}-dns-ingress
+  name: {{ include "powerdns-poweradmin.fullname" . }}-pdns-ingress
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "powerdns-poweradmin.labels" . | nindent 4 }}
 spec:
   podSelector:
     matchLabels:
-      {{- include "powerdns-poweradmin.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: powerdns
-  policyTypes: [Ingress]
+  policyTypes:
+    - Ingress
   ingress:
     - ports:
         - protocol: UDP
@@ -20,7 +21,6 @@ spec:
     - from:
         - podSelector:
             matchLabels:
-              {{- include "powerdns-poweradmin.selectorLabels" . | nindent 14 }}
               app.kubernetes.io/component: poweradmin
       ports:
         - protocol: TCP
@@ -29,37 +29,22 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "powerdns-poweradmin.fullname" . }}-poweradmin
+  name: {{ include "powerdns-poweradmin.fullname" . }}-poweradmin-ingress
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "powerdns-poweradmin.labels" . | nindent 4 }}
 spec:
   podSelector:
     matchLabels:
-      {{- include "powerdns-poweradmin.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: poweradmin
-  policyTypes: [Ingress]
-  ingress:
-    - ports:
-        - protocol: TCP
-          port: 8080
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: {{ include "powerdns-poweradmin.fullname" . }}-postgres
-  labels:
-    {{- include "powerdns-poweradmin.labels" . | nindent 4 }}
-spec:
-  podSelector:
-    matchLabels:
-      cnpg.io/cluster: {{ include "powerdns-poweradmin.dbName" . }}
-  policyTypes: [Ingress]
+  policyTypes:
+    - Ingress
   ingress:
     - from:
-        - podSelector:
+        - namespaceSelector:
             matchLabels:
-              {{- include "powerdns-poweradmin.selectorLabels" . | nindent 14 }}
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.gatewayNamespace }}
       ports:
         - protocol: TCP
-          port: 5432
+          port: 80
 {{- end }}

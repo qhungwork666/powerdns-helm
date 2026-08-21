@@ -1,122 +1,69 @@
-# -----------------------------------------------------------------------------
-# Global
-# -----------------------------------------------------------------------------
+# Production-oriented defaults for a native Kubernetes/Kubespray cluster.
+# Prerequisites managed outside this chart:
+#   - CloudNativePG Operator 1.30.0 (Helm chart 0.29.0)
+#   - Envoy Gateway + Gateway API CRDs
+#   - A Service type=LoadBalancer implementation supporting UDP + TCP 53
+
 nameOverride: ""
 fullnameOverride: ""
 
-imagePullSecrets: []
-
-# -----------------------------------------------------------------------------
-# PowerDNS
-# -----------------------------------------------------------------------------
 powerdns:
-  replicaCount: 2
-
   image:
-    repository: powerdns/pdns-auth-50
-    tag: "5.0.7"
+    repository: powerdns/pdns-auth-51
+    tag: "5.1.4"
     pullPolicy: IfNotPresent
+  replicas: 2
 
-  # Public authoritative DNS. The cluster must already have a LoadBalancer
-  # implementation (cloud LB, bare-metal LB, etc.).
   service:
     type: LoadBalancer
-    externalTrafficPolicy: Cluster
+    externalTrafficPolicy: Local
     annotations: {}
     loadBalancerIP: ""
-    ipFamilies: []
-    ipFamilyPolicy: ""
 
   api:
+    enabled: true
+    address: 0.0.0.0
     port: 8081
+    # Restrict to the actual Kubernetes Pod CIDRs where possible.
+    allowFrom:
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+      - 192.168.0.0/16
 
-  # The API server is intentionally limited to cluster traffic.
-  webserverAllowFrom:
-    - "10.0.0.0/8"
-    - "172.16.0.0/12"
-    - "192.168.0.0/16"
+  dns:
+    address: 0.0.0.0
+    port: 53
+    cacheTtl: 20
+    negqueryCacheTtl: 60
+    queryCacheTtl: 20
+    loglevel: 4
 
   resources:
     requests:
       cpu: 100m
       memory: 128Mi
     limits:
-      cpu: "2"
-      memory: 1Gi
+      cpu: "1"
+      memory: 512Mi
 
-  podSecurityContext:
-    seccompProfile:
-      type: RuntimeDefault
-
-  securityContext:
-    allowPrivilegeEscalation: false
-    capabilities:
-      drop: ["ALL"]
-
-  topologySpreadConstraints: []
-
-  nodeSelector: {}
-  tolerations: []
-  affinity: {}
-
-  podAnnotations: {}
-  podLabels: {}
-
-  pdb:
+  podDisruptionBudget:
     enabled: true
     minAvailable: 1
 
-# -----------------------------------------------------------------------------
-# Poweradmin
-# -----------------------------------------------------------------------------
-poweradmin:
-  replicaCount: 2
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: DoNotSchedule
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/component: powerdns
 
+poweradmin:
   image:
     repository: poweradmin/poweradmin
-    tag: "4.3.4"
+    tag: "4.4.0"
     pullPolicy: IfNotPresent
-
-  service:
-    type: ClusterIP
-    port: 80
-    targetPort: 8080
-    annotations: {}
-
-  ingress:
-    enabled: false
-    className: nginx
-    annotations: {}
-    hosts:
-      - host: poweradmin.example.com
-        paths:
-          - path: /
-            pathType: Prefix
-    tls: []
-
-  app:
-    title: Poweradmin DNS
-    timezone: Asia/Ho_Chi_Minh
-    language: en_EN
-    sessionTimeout: 1800
-    style: light
-    passwordEncryption: argon2id
-    lockoutEnabled: true
-    lockoutAttempts: 5
-    lockoutDuration: 15
-    loginTokenValidation: true
-    globalTokenValidation: true
-    loggingType: native
-    loggingLevel: info
-    loggingDatabaseEnabled: true
-    csvExportEnabled: true
-    zoneImportExportEnabled: false
-
-  admin:
-    create: true
-    username: admin
-    email: admin@example.com
-    fullname: Administrator
+  replicas: 2
 
   resources:
     requests:
@@ -124,56 +71,53 @@ poweradmin:
       memory: 256Mi
     limits:
       cpu: "1"
-      memory: 1Gi
+      memory: 768Mi
 
-  podSecurityContext:
-    runAsNonRoot: true
-    runAsUser: 82
-    runAsGroup: 82
-    fsGroup: 82
-    seccompProfile:
-      type: RuntimeDefault
-
-  securityContext:
-    allowPrivilegeEscalation: false
-    capabilities:
-      drop: ["ALL"]
-
-  topologySpreadConstraints: []
-  nodeSelector: {}
-  tolerations: []
-  affinity: {}
-  podAnnotations: {}
-  podLabels: {}
-
-  pdb:
+  podDisruptionBudget:
     enabled: true
     minAvailable: 1
 
-# -----------------------------------------------------------------------------
-# DNS defaults exposed in Poweradmin UI
-# -----------------------------------------------------------------------------
-dns:
-  ns1: ns1.example.com
-  ns2: ns2.example.com
-  hostmaster: hostmaster.example.com
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: DoNotSchedule
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/component: poweradmin
 
-# -----------------------------------------------------------------------------
-# CloudNativePG
-# IMPORTANT: the CNPG operator must already be installed in the cluster.
-# Keep operator lifecycle separate from this application chart.
-# -----------------------------------------------------------------------------
+  app:
+    title: Poweradmin DNS
+    language: en_EN
+    timezone: Asia/Ho_Chi_Minh
+    sessionTimeout: 1800
+    passwordEncryption: argon2id
+    loginTokenValidation: true
+    globalTokenValidation: true
+    lockoutEnabled: true
+    lockoutAttempts: 5
+    lockoutDuration: 15
+
+  dns:
+    backend: api
+    ns1: ns1.example.com
+    ns2: ns2.example.com
+    hostmaster: hostmaster.example.com
+
+  api:
+    enabled: false
+    docsEnabled: false
+
 postgresql:
+  enabled: true
   instances: 3
-  imageName: "ghcr.io/cloudnative-pg/postgresql:16"
+
+  image:
+    # Official CNPG PostgreSQL 18 image used by the 1.30 operator line.
+    repository: ghcr.io/cloudnative-pg/postgresql
+    tag: "18.4-minimal-trixie"
 
   storage:
     size: 20Gi
-    storageClass: ""
-
-  walStorage:
-    enabled: false
-    size: 10Gi
     storageClass: ""
 
   resources:
@@ -184,45 +128,59 @@ postgresql:
       cpu: "2"
       memory: 2Gi
 
-  postgresql:
-    parameters:
-      max_connections: "200"
-      shared_buffers: "512MB"
-      effective_cache_size: "1536MB"
-      work_mem: "8MB"
-      maintenance_work_mem: "128MB"
-      random_page_cost: "1.1"
-      wal_compression: "on"
+  enableSuperuserAccess: false
 
-# -----------------------------------------------------------------------------
-# Credentials
-# For GitOps, prefer an existing Secret managed by SOPS/SealedSecrets/
-# External Secrets. The chart can create one for small/simple installations.
-# -----------------------------------------------------------------------------
+  roles:
+    pdns:
+      existingSecret: ""
+      username: pdns
+      generatedPassword: ""
+    poweradmin:
+      existingSecret: ""
+      username: poweradmin
+      generatedPassword: ""
+
 secrets:
-  create: true
   existingSecret: ""
+  keys:
+    pdnsApiKey: pdns-api-key
+    poweradminAdminPassword: poweradmin-admin-password
+    poweradminSessionKey: poweradmin-session-key
+  generated:
+    pdnsApiKey: ""
+    poweradminAdminPassword: ""
+    poweradminSessionKey: ""
+  admin:
+    username: admin
+    email: admin@example.com
+    fullname: DNS Administrator
 
-  postgres:
-    pdnsUser: pdns
-    pdnsPassword: CHANGE_ME_PDNS_DB_PASSWORD
-    poweradminUser: poweradmin
-    poweradminPassword: CHANGE_ME_POWERADMIN_DB_PASSWORD
+# Platform-owned Gateway. This chart creates only the HTTPRoute.
+# The referenced Gateway listener must allow Routes from this namespace.
+gateway:
+  enabled: true
+  existingGateway:
+    name: public-gateway
+    namespace: envoy-gateway-system
+    sectionName: https
+  hostname: poweradmin.example.com
 
-  powerdns:
-    apiKey: CHANGE_ME_LONG_RANDOM_POWERDNS_API_KEY
-
-  poweradmin:
-    adminPassword: CHANGE_ME_LONG_RANDOM_POWERADMIN_ADMIN_PASSWORD
-    sessionKey: CHANGE_ME_LONG_RANDOM_POWERADMIN_SESSION_KEY
-
-# -----------------------------------------------------------------------------
-# NetworkPolicy
-# Disabled by default to avoid assumptions about your Kubespray CNI/LB.
-# Enable once cluster network CIDRs are known.
-# -----------------------------------------------------------------------------
 networkPolicy:
-  enabled: false
-  # If enabled, ingress to PowerDNS API is only from Poweradmin.
-  # DNS :53 remains open from all sources.
+  enabled: true
+  gatewayNamespace: envoy-gateway-system
 
+serviceAccount:
+  create: true
+  name: ""
+  automountServiceAccountToken: false
+
+podSecurityContext:
+  seccompProfile:
+    type: RuntimeDefault
+
+commonLabels: {}
+commonAnnotations: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

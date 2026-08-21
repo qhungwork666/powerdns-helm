@@ -1,18 +1,21 @@
 apiVersion: v2
 name: powerdns-poweradmin
-description: Minimal production-oriented Helm chart for PowerDNS Authoritative + Poweradmin with CloudNativePG
-version: 0.1.0
-appVersion: "5.0.7"
+description: PowerDNS Authoritative + Poweradmin with CloudNativePG and Gateway API
+version: 0.3.0
+appVersion: "5.1.4"
 type: application
+kubeVersion: ">=1.34.0-0 <1.37.0-0"
 keywords:
   - dns
   - powerdns
   - poweradmin
   - authoritative-dns
-  - kubernetes
+  - gateway-api
   - cloudnativepg
 home: https://www.powerdns.com/
 sources:
-  - https://doc.powerdns.com/authoritative/
-  - https://docs.poweradmin.org/
-  - https://cloudnative-pg.io/
+  - https://github.com/PowerDNS/pdns
+  - https://github.com/poweradmin/poweradmin
+  - https://github.com/cloudnative-pg/cloudnative-pg
+maintainers:
+  - name: platform
