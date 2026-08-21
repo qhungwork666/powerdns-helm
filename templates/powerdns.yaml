@@ -1,0 +1,163 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "powerdns-poweradmin.pdnsName" . }}
+  labels:
+    {{- include "powerdns-poweradmin.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.powerdns.replicaCount }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "powerdns-poweradmin.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: powerdns
+  template:
+    metadata:
+      labels:
+        {{- include "powerdns-poweradmin.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: powerdns
+        {{- with .Values.powerdns.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/powerdns-config-secret.yaml") . | sha256sum }}
+        {{- with .Values.powerdns.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        {{- toYaml .Values.powerdns.podSecurityContext | nindent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.powerdns.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.powerdns.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.powerdns.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.powerdns.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: powerdns
+          image: "{{ .Values.powerdns.image.repository }}:{{ .Values.powerdns.image.tag }}"
+          imagePullPolicy: {{ .Values.powerdns.image.pullPolicy }}
+          ports:
+            - name: dns-udp
+              containerPort: 53
+              protocol: UDP
+            - name: dns-tcp
+              containerPort: 53
+              protocol: TCP
+            - name: api
+              containerPort: {{ .Values.powerdns.api.port }}
+              protocol: TCP
+          volumeMounts:
+            - name: config
+              mountPath: /etc/powerdns/pdns.conf
+              subPath: pdns.conf
+              readOnly: true
+          resources:
+            {{- toYaml .Values.powerdns.resources | nindent 12 }}
+          readinessProbe:
+            tcpSocket:
+              port: {{ .Values.powerdns.api.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 6
+          livenessProbe:
+            tcpSocket:
+              port: 53
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          securityContext:
+            {{- toYaml .Values.powerdns.securityContext | nindent 12 }}
+      volumes:
+        - name: config
+          secret:
+            secretName: {{ include "powerdns-poweradmin.fullname" . }}-pdns-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "powerdns-poweradmin.pdnsName" . }}
+  labels:
+    {{- include "powerdns-poweradmin.labels" . | nindent 4 }}
+  {{- with .Values.powerdns.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.powerdns.service.type }}
+  externalTrafficPolicy: {{ .Values.powerdns.service.externalTrafficPolicy }}
+  {{- with .Values.powerdns.service.loadBalancerIP }}
+  loadBalancerIP: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.powerdns.service.ipFamilies }}
+  ipFamilies:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.powerdns.service.ipFamilyPolicy }}
+  ipFamilyPolicy: {{ . | quote }}
+  {{- end }}
+  selector:
+    {{- include "powerdns-poweradmin.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: powerdns
+  ports:
+    - name: dns-udp
+      port: 53
+      targetPort: 53
+      protocol: UDP
+    - name: dns-tcp
+      port: 53
+      targetPort: 53
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "powerdns-poweradmin.pdnsApiName" . }}
+  labels:
+    {{- include "powerdns-poweradmin.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "powerdns-poweradmin.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: powerdns
+  ports:
+    - name: api
+      port: {{ .Values.powerdns.api.port }}
+      targetPort: {{ .Values.powerdns.api.port }}
+      protocol: TCP
+{{- if .Values.powerdns.pdb.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "powerdns-poweradmin.pdnsName" . }}
+  labels:
+    {{- include "powerdns-poweradmin.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.powerdns.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "powerdns-poweradmin.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: powerdns
+{{- end }}

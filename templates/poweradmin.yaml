@@ -1,0 +1,228 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "powerdns-poweradmin.paName" . }}
+  labels:
+    {{- include "powerdns-poweradmin.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.poweradmin.replicaCount }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "powerdns-poweradmin.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: poweradmin
+  template:
+    metadata:
+      labels:
+        {{- include "powerdns-poweradmin.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: poweradmin
+        {{- with .Values.poweradmin.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.poweradmin.podSecurityContext | nindent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.poweradmin.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.poweradmin.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.poweradmin.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.poweradmin.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: poweradmin
+          image: "{{ .Values.poweradmin.image.repository }}:{{ .Values.poweradmin.image.tag }}"
+          imagePullPolicy: {{ .Values.poweradmin.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: DB_TYPE
+              value: pgsql
+            - name: DB_HOST
+              value: {{ include "powerdns-poweradmin.dbName" . }}-rw
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_NAME
+              value: poweradmin
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "powerdns-poweradmin.fullname" . }}-poweradmin-db
+                  key: username
+            - name: DB_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "powerdns-poweradmin.fullname" . }}-poweradmin-db
+                  key: password
+            - name: PA_PDNS_API_URL
+              value: "http://{{ include "powerdns-poweradmin.pdnsApiName" . }}:{{ .Values.powerdns.api.port }}"
+            - name: PA_PDNS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "powerdns-poweradmin.secretName" . }}
+                  key: powerdns-api-key
+            - name: PA_CREATE_ADMIN
+              value: {{ ternary "1" "0" .Values.poweradmin.admin.create | quote }}
+            - name: PA_ADMIN_USERNAME
+              value: {{ .Values.poweradmin.admin.username | quote }}
+            - name: PA_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "powerdns-poweradmin.secretName" . }}
+                  key: poweradmin-admin-password
+            - name: PA_ADMIN_EMAIL
+              value: {{ .Values.poweradmin.admin.email | quote }}
+            - name: PA_ADMIN_FULLNAME
+              value: {{ .Values.poweradmin.admin.fullname | quote }}
+            - name: PA_SESSION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "powerdns-poweradmin.secretName" . }}
+                  key: poweradmin-session-key
+            - name: PA_APP_TITLE
+              value: {{ .Values.poweradmin.app.title | quote }}
+            - name: PA_DEFAULT_LANGUAGE
+              value: {{ .Values.poweradmin.app.language | quote }}
+            - name: PA_TIMEZONE
+              value: {{ .Values.poweradmin.app.timezone | quote }}
+            - name: PA_SESSION_TIMEOUT
+              value: {{ .Values.poweradmin.app.sessionTimeout | quote }}
+            - name: PA_STYLE
+              value: {{ .Values.poweradmin.app.style | quote }}
+            - name: PA_PASSWORD_ENCRYPTION
+              value: {{ .Values.poweradmin.app.passwordEncryption | quote }}
+            - name: PA_LOCKOUT_ENABLED
+              value: {{ ternary "true" "false" .Values.poweradmin.app.lockoutEnabled | quote }}
+            - name: PA_LOCKOUT_ATTEMPTS
+              value: {{ .Values.poweradmin.app.lockoutAttempts | quote }}
+            - name: PA_LOCKOUT_DURATION
+              value: {{ .Values.poweradmin.app.lockoutDuration | quote }}
+            - name: PA_LOGIN_TOKEN_VALIDATION
+              value: {{ ternary "true" "false" .Values.poweradmin.app.loginTokenValidation | quote }}
+            - name: PA_GLOBAL_TOKEN_VALIDATION
+              value: {{ ternary "true" "false" .Values.poweradmin.app.globalTokenValidation | quote }}
+            - name: PA_LOGGING_TYPE
+              value: {{ .Values.poweradmin.app.loggingType | quote }}
+            - name: PA_LOGGING_LEVEL
+              value: {{ .Values.poweradmin.app.loggingLevel | quote }}
+            - name: PA_LOGGING_DATABASE_ENABLED
+              value: {{ ternary "true" "false" .Values.poweradmin.app.loggingDatabaseEnabled | quote }}
+            - name: PA_MODULE_CSV_EXPORT_ENABLED
+              value: {{ ternary "true" "false" .Values.poweradmin.app.csvExportEnabled | quote }}
+            - name: PA_MODULE_ZONE_IMPORT_EXPORT_ENABLED
+              value: {{ ternary "true" "false" .Values.poweradmin.app.zoneImportExportEnabled | quote }}
+            - name: DNS_NS1
+              value: {{ .Values.dns.ns1 | quote }}
+            - name: DNS_NS2
+              value: {{ .Values.dns.ns2 | quote }}
+            - name: DNS_HOSTMASTER
+              value: {{ .Values.dns.hostmaster | quote }}
+          resources:
+            {{- toYaml .Values.poweradmin.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /login
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /login
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          securityContext:
+            {{- toYaml .Values.poweradmin.securityContext | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "powerdns-poweradmin.paName" . }}
+  labels:
+    {{- include "powerdns-poweradmin.labels" . | nindent 4 }}
+  {{- with .Values.poweradmin.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.poweradmin.service.type }}
+  selector:
+    {{- include "powerdns-poweradmin.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: poweradmin
+  ports:
+    - name: http
+      port: {{ .Values.poweradmin.service.port }}
+      targetPort: {{ .Values.poweradmin.service.targetPort }}
+      protocol: TCP
+{{- if .Values.poweradmin.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "powerdns-poweradmin.paName" . }}
+  labels:
+    {{- include "powerdns-poweradmin.labels" . | nindent 4 }}
+  {{- with .Values.poweradmin.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.poweradmin.ingress.className }}
+  {{- with .Values.poweradmin.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range .Values.poweradmin.ingress.hosts }}
+    - host: {{ .host }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType }}
+            backend:
+              service:
+                name: {{ include "powerdns-poweradmin.paName" $ }}
+                port:
+                  number: {{ $.Values.poweradmin.service.port }}
+          {{- end }}
+    {{- end }}
+{{- end }}
+{{- if .Values.poweradmin.pdb.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "powerdns-poweradmin.paName" . }}
+  labels:
+    {{- include "powerdns-poweradmin.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.poweradmin.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "powerdns-poweradmin.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: poweradmin
+{{- end }}

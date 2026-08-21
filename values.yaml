@@ -1,0 +1,228 @@
+# -----------------------------------------------------------------------------
+# Global
+# -----------------------------------------------------------------------------
+nameOverride: ""
+fullnameOverride: ""
+
+imagePullSecrets: []
+
+# -----------------------------------------------------------------------------
+# PowerDNS
+# -----------------------------------------------------------------------------
+powerdns:
+  replicaCount: 2
+
+  image:
+    repository: powerdns/pdns-auth-50
+    tag: "5.0.7"
+    pullPolicy: IfNotPresent
+
+  # Public authoritative DNS. The cluster must already have a LoadBalancer
+  # implementation (cloud LB, bare-metal LB, etc.).
+  service:
+    type: LoadBalancer
+    externalTrafficPolicy: Cluster
+    annotations: {}
+    loadBalancerIP: ""
+    ipFamilies: []
+    ipFamilyPolicy: ""
+
+  api:
+    port: 8081
+
+  # The API server is intentionally limited to cluster traffic.
+  webserverAllowFrom:
+    - "10.0.0.0/8"
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: "2"
+      memory: 1Gi
+
+  podSecurityContext:
+    seccompProfile:
+      type: RuntimeDefault
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+
+  topologySpreadConstraints: []
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+  podAnnotations: {}
+  podLabels: {}
+
+  pdb:
+    enabled: true
+    minAvailable: 1
+
+# -----------------------------------------------------------------------------
+# Poweradmin
+# -----------------------------------------------------------------------------
+poweradmin:
+  replicaCount: 2
+
+  image:
+    repository: poweradmin/poweradmin
+    tag: "4.3.4"
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    port: 80
+    targetPort: 8080
+    annotations: {}
+
+  ingress:
+    enabled: false
+    className: nginx
+    annotations: {}
+    hosts:
+      - host: poweradmin.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+
+  app:
+    title: Poweradmin DNS
+    timezone: Asia/Ho_Chi_Minh
+    language: en_EN
+    sessionTimeout: 1800
+    style: light
+    passwordEncryption: argon2id
+    lockoutEnabled: true
+    lockoutAttempts: 5
+    lockoutDuration: 15
+    loginTokenValidation: true
+    globalTokenValidation: true
+    loggingType: native
+    loggingLevel: info
+    loggingDatabaseEnabled: true
+    csvExportEnabled: true
+    zoneImportExportEnabled: false
+
+  admin:
+    create: true
+    username: admin
+    email: admin@example.com
+    fullname: Administrator
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 82
+    runAsGroup: 82
+    fsGroup: 82
+    seccompProfile:
+      type: RuntimeDefault
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+
+  topologySpreadConstraints: []
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podAnnotations: {}
+  podLabels: {}
+
+  pdb:
+    enabled: true
+    minAvailable: 1
+
+# -----------------------------------------------------------------------------
+# DNS defaults exposed in Poweradmin UI
+# -----------------------------------------------------------------------------
+dns:
+  ns1: ns1.example.com
+  ns2: ns2.example.com
+  hostmaster: hostmaster.example.com
+
+# -----------------------------------------------------------------------------
+# CloudNativePG
+# IMPORTANT: the CNPG operator must already be installed in the cluster.
+# Keep operator lifecycle separate from this application chart.
+# -----------------------------------------------------------------------------
+postgresql:
+  instances: 3
+  imageName: "ghcr.io/cloudnative-pg/postgresql:16"
+
+  storage:
+    size: 20Gi
+    storageClass: ""
+
+  walStorage:
+    enabled: false
+    size: 10Gi
+    storageClass: ""
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+
+  postgresql:
+    parameters:
+      max_connections: "200"
+      shared_buffers: "512MB"
+      effective_cache_size: "1536MB"
+      work_mem: "8MB"
+      maintenance_work_mem: "128MB"
+      random_page_cost: "1.1"
+      wal_compression: "on"
+
+# -----------------------------------------------------------------------------
+# Credentials
+# For GitOps, prefer an existing Secret managed by SOPS/SealedSecrets/
+# External Secrets. The chart can create one for small/simple installations.
+# -----------------------------------------------------------------------------
+secrets:
+  create: true
+  existingSecret: ""
+
+  postgres:
+    pdnsUser: pdns
+    pdnsPassword: CHANGE_ME_PDNS_DB_PASSWORD
+    poweradminUser: poweradmin
+    poweradminPassword: CHANGE_ME_POWERADMIN_DB_PASSWORD
+
+  powerdns:
+    apiKey: CHANGE_ME_LONG_RANDOM_POWERDNS_API_KEY
+
+  poweradmin:
+    adminPassword: CHANGE_ME_LONG_RANDOM_POWERADMIN_ADMIN_PASSWORD
+    sessionKey: CHANGE_ME_LONG_RANDOM_POWERADMIN_SESSION_KEY
+
+# -----------------------------------------------------------------------------
+# NetworkPolicy
+# Disabled by default to avoid assumptions about your Kubespray CNI/LB.
+# Enable once cluster network CIDRs are known.
+# -----------------------------------------------------------------------------
+networkPolicy:
+  enabled: false
+  # If enabled, ingress to PowerDNS API is only from Poweradmin.
+  # DNS :53 remains open from all sources.
+

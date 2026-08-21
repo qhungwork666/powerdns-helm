@@ -1,0 +1,57 @@
+# Example production values. Do not commit real secrets.
+powerdns:
+  replicaCount: 2
+  service:
+    type: LoadBalancer
+    externalTrafficPolicy: Cluster
+  # Use your cluster/pod CIDRs here if you expose the PowerDNS API only internally.
+  webserverAllowFrom:
+    - "10.0.0.0/8"
+
+poweradmin:
+  replicaCount: 2
+  ingress:
+    enabled: true
+    className: nginx
+    hosts:
+      - host: poweradmin.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: poweradmin-tls
+        hosts:
+          - poweradmin.example.com
+
+postgresql:
+  instances: 3
+  imageName: ghcr.io/cloudnative-pg/postgresql:16
+  storage:
+    size: 50Gi
+    storageClass: "YOUR_FAST_STORAGECLASS"
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "4"
+      memory: 4Gi
+  backup:
+    enabled: false
+
+# Prefer a real Secret solution in GitOps. These values are placeholders only.
+secrets:
+  create: true
+  postgres:
+    pdnsPassword: CHANGE_ME
+    poweradminPassword: CHANGE_ME
+  powerdns:
+    apiKey: CHANGE_ME
+  poweradmin:
+    adminPassword: CHANGE_ME
+    sessionKey: CHANGE_ME
+
+dns:
+  ns1: ns1.example.com
+  ns2: ns2.example.com
+  hostmaster: hostmaster.example.com

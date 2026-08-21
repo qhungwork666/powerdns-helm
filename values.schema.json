@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "powerdns": {"type": "object"},
+    "poweradmin": {"type": "object"},
+    "postgresql": {"type": "object"},
+    "dns": {"type": "object"},
+    "secrets": {"type": "object"},
+    "networkPolicy": {"type": "object"}
+  }
+}

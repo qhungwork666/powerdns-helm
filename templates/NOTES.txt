@@ -1,0 +1,26 @@
+PowerDNS + Poweradmin has been rendered.
+
+1. Prerequisite: CloudNativePG operator must already be installed.
+   Example:
+     helm repo add cnpg https://cloudnative-pg.github.io/charts
+     helm upgrade --install cnpg cnpg/cloudnative-pg -n cnpg-system --create-namespace
+
+2. Set real DNS/admin credentials and DNS names before production.
+
+3. Enable the Poweradmin Ingress and provide TLS:
+     --set poweradmin.ingress.enabled=true
+     --set poweradmin.ingress.hosts[0].host=poweradmin.example.com
+     --set poweradmin.ingress.tls[0].hosts[0]=poweradmin.example.com
+     --set poweradmin.ingress.tls[0].secretName=poweradmin-tls
+
+4. Public DNS endpoint:
+     kubectl get svc {{ include "powerdns-poweradmin.pdnsName" . }}
+
+5. The PowerDNS API is exposed only as ClusterIP:
+     {{ include "powerdns-poweradmin.pdnsApiName" . }}:{{ .Values.powerdns.api.port }}
+
+6. The Poweradmin container initializes its own PostgreSQL schema on first startup.
+   PowerDNS schema is initialized by CloudNativePG during cluster bootstrap.
+
+7. IMPORTANT: The bundled PostgreSQL schema is intended for the pinned PowerDNS version.
+   For major/minor PowerDNS upgrades, review the upstream schema/migrations before upgrade.

@@ -1,0 +1,65 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "powerdns-poweradmin.fullname" . }}-dns-ingress
+  labels:
+    {{- include "powerdns-poweradmin.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "powerdns-poweradmin.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: powerdns
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "powerdns-poweradmin.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: poweradmin
+      ports:
+        - protocol: TCP
+          port: {{ .Values.powerdns.api.port }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "powerdns-poweradmin.fullname" . }}-poweradmin
+  labels:
+    {{- include "powerdns-poweradmin.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "powerdns-poweradmin.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: poweradmin
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "powerdns-poweradmin.fullname" . }}-postgres
+  labels:
+    {{- include "powerdns-poweradmin.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: {{ include "powerdns-poweradmin.dbName" . }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "powerdns-poweradmin.selectorLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 5432
+{{- end }}
