@@ -1,0 +1,209 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "powerdns-poweradmin.fullname" . }}-poweradmin
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "powerdns-poweradmin.labels" . | nindent 4 }}
+    app.kubernetes.io/component: poweradmin
+spec:
+  replicas: {{ .Values.poweradmin.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "powerdns-poweradmin.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: poweradmin
+  template:
+    metadata:
+      labels:
+        {{- include "powerdns-poweradmin.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: poweradmin
+    spec:
+      serviceAccountName: {{ include "powerdns-poweradmin.fullname" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: 30
+      topologySpreadConstraints:
+        {{- toYaml .Values.poweradmin.topologySpreadConstraints | nindent 8 }}
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app.kubernetes.io/component: poweradmin
+              topologyKey: kubernetes.io/hostname
+      initContainers:
+        - name: wait-for-database
+          image: {{ printf "%s:%s" .Values.postgresql.image.repository .Values.postgresql.image.tag | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              export PGPASSWORD="$(cat /run/db/password)"
+              until pg_isready -h "{{ include "powerdns-poweradmin.fullname" . }}-postgres-rw" -p 5432 -U poweradmin -d poweradmin; do sleep 2; done
+          volumeMounts:
+            - name: database-credentials
+              mountPath: /run/db
+              readOnly: true
+      containers:
+        - name: poweradmin
+          image: {{ printf "%s:%s" .Values.poweradmin.image.repository .Values.poweradmin.image.tag | quote }}
+          imagePullPolicy: {{ .Values.poweradmin.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          env:
+            - name: DB_TYPE
+              value: pgsql
+            - name: DB_HOST
+              value: {{ printf "%s-postgres-rw" (include "powerdns-poweradmin.fullname" .) | quote }}
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_NAME
+              value: poweradmin
+            - name: DB_USER
+              value: poweradmin
+            - name: DB_PASS__FILE
+              value: /run/db-secrets/password
+
+            - name: PA_CREATE_ADMIN
+              value: "true"
+            - name: PA_ADMIN_USERNAME
+              value: {{ .Values.secrets.admin.username | quote }}
+            - name: PA_ADMIN_PASSWORD__FILE
+              value: /run/secrets/poweradmin-admin-password
+            - name: PA_ADMIN_EMAIL
+              value: {{ .Values.secrets.admin.email | quote }}
+            - name: PA_ADMIN_FULLNAME
+              value: {{ .Values.secrets.admin.fullname | quote }}
+            - name: PA_SESSION_KEY__FILE
+              value: /run/secrets/poweradmin-session-key
+
+            - name: PA_DNS_BACKEND
+              value: {{ .Values.poweradmin.dns.backend | quote }}
+            - name: PA_PDNS_API_URL
+              value: {{ printf "http://%s-pdns-api:%d" (include "powerdns-poweradmin.fullname" .) (.Values.powerdns.api.port | int) | quote }}
+            - name: PA_PDNS_API_KEY__FILE
+              value: /run/secrets/pdns-api-key
+
+            - name: PA_APP_TITLE
+              value: {{ .Values.poweradmin.app.title | quote }}
+            - name: PA_DEFAULT_LANGUAGE
+              value: {{ .Values.poweradmin.app.language | quote }}
+            - name: PA_TIMEZONE
+              value: {{ .Values.poweradmin.app.timezone | quote }}
+            - name: PA_SESSION_TIMEOUT
+              value: {{ .Values.poweradmin.app.sessionTimeout | quote }}
+            - name: PA_PASSWORD_ENCRYPTION
+              value: {{ .Values.poweradmin.app.passwordEncryption | quote }}
+            - name: PA_LOGIN_TOKEN_VALIDATION
+              value: {{ ternary "true" "false" .Values.poweradmin.app.loginTokenValidation | quote }}
+            - name: PA_GLOBAL_TOKEN_VALIDATION
+              value: {{ ternary "true" "false" .Values.poweradmin.app.globalTokenValidation | quote }}
+            - name: PA_LOCKOUT_ENABLED
+              value: {{ ternary "true" "false" .Values.poweradmin.app.lockoutEnabled | quote }}
+            - name: PA_LOCKOUT_ATTEMPTS
+              value: {{ .Values.poweradmin.app.lockoutAttempts | quote }}
+            - name: PA_LOCKOUT_DURATION
+              value: {{ .Values.poweradmin.app.lockoutDuration | quote }}
+            - name: PA_API_ENABLED
+              value: {{ ternary "true" "false" .Values.poweradmin.api.enabled | quote }}
+            - name: PA_API_DOCS_ENABLED
+              value: {{ ternary "true" "false" .Values.poweradmin.api.docsEnabled | quote }}
+
+          volumeMounts:
+            - name: secrets
+              mountPath: /run/secrets
+              readOnly: true
+            - name: database-credentials
+              mountPath: /run/db-secrets
+              readOnly: true
+          startupProbe:
+            httpGet:
+              path: /login
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /login
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /login
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 4
+          resources:
+            {{- toYaml .Values.poweradmin.resources | nindent 12 }}
+      volumes:
+        - name: secrets
+          secret:
+            secretName: {{ include "powerdns-poweradmin.secretName" . }}
+            items:
+              - key: {{ .Values.secrets.keys.poweradminAdminPassword }}
+                path: poweradmin-admin-password
+              - key: {{ .Values.secrets.keys.poweradminSessionKey }}
+                path: poweradmin-session-key
+              - key: {{ .Values.secrets.keys.pdnsApiKey }}
+                path: pdns-api-key
+        - name: database-credentials
+          secret:
+            secretName: {{ include "powerdns-poweradmin.poweradminRoleSecretName" . }}
+            items:
+              - key: password
+                path: password
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "powerdns-poweradmin.fullname" . }}-poweradmin
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "powerdns-poweradmin.labels" . | nindent 4 }}
+    app.kubernetes.io/component: poweradmin
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "powerdns-poweradmin.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: poweradmin
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+{{- if .Values.poweradmin.podDisruptionBudget.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "powerdns-poweradmin.fullname" . }}-poweradmin
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "powerdns-poweradmin.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.poweradmin.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "powerdns-poweradmin.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: poweradmin
+{{- end }}

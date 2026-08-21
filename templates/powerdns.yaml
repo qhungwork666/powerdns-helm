@@ -1,0 +1,247 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "powerdns-poweradmin.fullname" . }}-pdns-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "powerdns-poweradmin.labels" . | nindent 4 }}
+data:
+  pdns.conf.template: |
+    daemon=no
+    guardian=no
+    local-address={{ .Values.powerdns.dns.address }}
+    local-port={{ .Values.powerdns.dns.port }}
+
+    launch=gpgsql
+    gpgsql-host={{ include "powerdns-poweradmin.fullname" . }}-postgres-rw
+    gpgsql-port=5432
+    gpgsql-dbname=pdns
+    gpgsql-user=pdns
+    gpgsql-password=${PDNS_DB_PASSWORD}
+    gpgsql-dnssec=yes
+
+    api={{ ternary "yes" "no" .Values.powerdns.api.enabled }}
+    api-key=${PDNS_API_KEY}
+    webserver={{ ternary "yes" "no" .Values.powerdns.api.enabled }}
+    webserver-address={{ .Values.powerdns.api.address }}
+    webserver-port={{ .Values.powerdns.api.port }}
+    webserver-allow-from={{ join "," .Values.powerdns.api.allowFrom }}
+    webserver-loglevel=none
+
+    cache-ttl={{ .Values.powerdns.dns.cacheTtl }}
+    negquery-cache-ttl={{ .Values.powerdns.dns.negqueryCacheTtl }}
+    query-cache-ttl={{ .Values.powerdns.dns.queryCacheTtl }}
+    loglevel={{ .Values.powerdns.dns.loglevel }}
+    log-dns-details=no
+    version-string=anonymous
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "powerdns-poweradmin.fullname" . }}-pdns
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "powerdns-poweradmin.labels" . | nindent 4 }}
+    app.kubernetes.io/component: powerdns
+spec:
+  replicas: {{ .Values.powerdns.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "powerdns-poweradmin.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: powerdns
+  template:
+    metadata:
+      labels:
+        {{- include "powerdns-poweradmin.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: powerdns
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/powerdns.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "powerdns-poweradmin.fullname" . }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      topologySpreadConstraints:
+        {{- toYaml .Values.powerdns.topologySpreadConstraints | nindent 8 }}
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app.kubernetes.io/component: powerdns
+              topologyKey: kubernetes.io/hostname
+      initContainers:
+        - name: wait-for-pdns-schema
+          image: {{ printf "%s:%s" .Values.postgresql.image.repository .Values.postgresql.image.tag | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              export PGPASSWORD="$(cat /secrets/pdns-db-password)"
+              until psql "host={{ include "powerdns-poweradmin.fullname" . }}-postgres-rw port=5432 dbname=pdns user=pdns" -tAc "SELECT 1 FROM pg_catalog.pg_tables WHERE schemaname='public' AND tablename='domains'" | grep -q 1; do sleep 2; done
+          volumeMounts:
+            - name: secrets
+              mountPath: /secrets
+              readOnly: true
+        - name: render-config
+          image: alpine:3.22
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              apk add --no-cache gettext >/dev/null
+              export PDNS_DB_PASSWORD="$(cat /secrets/pdns-db-password)"
+              export PDNS_API_KEY="$(cat /api-key/pdns-api-key)"
+              envsubst < /config-template/pdns.conf.template > /generated/pdns.conf
+              chmod 0444 /generated/pdns.conf
+          volumeMounts:
+            - name: config-template
+              mountPath: /config-template
+              readOnly: true
+            - name: secrets
+              mountPath: /secrets
+              readOnly: true
+            - name: api-key
+              mountPath: /api-key
+              readOnly: true
+            - name: generated-config
+              mountPath: /generated
+      containers:
+        - name: powerdns
+          image: {{ printf "%s:%s" .Values.powerdns.image.repository .Values.powerdns.image.tag | quote }}
+          imagePullPolicy: {{ .Values.powerdns.image.pullPolicy }}
+          ports:
+            - name: dns-udp
+              containerPort: 53
+              protocol: UDP
+            - name: dns-tcp
+              containerPort: 53
+              protocol: TCP
+            - name: api
+              containerPort: {{ .Values.powerdns.api.port }}
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              add: ["NET_BIND_SERVICE"]
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          readinessProbe:
+            tcpSocket:
+              port: dns-tcp
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 12
+          startupProbe:
+            tcpSocket:
+              port: dns-tcp
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 30
+          livenessProbe:
+            tcpSocket:
+              port: dns-tcp
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 4
+          resources:
+            {{- toYaml .Values.powerdns.resources | nindent 12 }}
+          volumeMounts:
+            - name: generated-config
+              mountPath: /etc/powerdns/pdns.conf
+              subPath: pdns.conf
+              readOnly: true
+      volumes:
+        - name: config-template
+          configMap:
+            name: {{ include "powerdns-poweradmin.fullname" . }}-pdns-config
+        - name: secrets
+          secret:
+            secretName: {{ include "powerdns-poweradmin.pdnsRoleSecretName" . }}
+            items:
+              - key: password
+                path: pdns-db-password
+        - name: api-key
+          secret:
+            secretName: {{ include "powerdns-poweradmin.secretName" . }}
+            items:
+              - key: {{ .Values.secrets.keys.pdnsApiKey }}
+                path: pdns-api-key
+        - name: generated-config
+          emptyDir:
+            medium: Memory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "powerdns-poweradmin.fullname" . }}-pdns
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "powerdns-poweradmin.labels" . | nindent 4 }}
+    app.kubernetes.io/component: powerdns
+  {{- with .Values.powerdns.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.powerdns.service.type }}
+  externalTrafficPolicy: {{ .Values.powerdns.service.externalTrafficPolicy }}
+  {{- with .Values.powerdns.service.loadBalancerIP }}
+  loadBalancerIP: {{ . | quote }}
+  {{- end }}
+  selector:
+    {{- include "powerdns-poweradmin.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: powerdns
+  ports:
+    - name: dns-udp
+      port: 53
+      targetPort: dns-udp
+      protocol: UDP
+    - name: dns-tcp
+      port: 53
+      targetPort: dns-tcp
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "powerdns-poweradmin.fullname" . }}-pdns-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "powerdns-poweradmin.labels" . | nindent 4 }}
+    app.kubernetes.io/component: powerdns
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "powerdns-poweradmin.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: powerdns
+  ports:
+    - name: api
+      port: {{ .Values.powerdns.api.port }}
+      targetPort: api
+      protocol: TCP
+{{- if .Values.powerdns.podDisruptionBudget.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "powerdns-poweradmin.fullname" . }}-pdns
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "powerdns-poweradmin.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.powerdns.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "powerdns-poweradmin.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: powerdns
+{{- end }}

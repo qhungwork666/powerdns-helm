@@ -1,0 +1,111 @@
+{{- if .Values.postgresql.enabled }}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ include "powerdns-poweradmin.fullname" . }}-postgres
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "powerdns-poweradmin.labels" . | nindent 4 }}
+spec:
+  instances: {{ .Values.postgresql.instances }}
+  imageName: {{ printf "%s:%s" .Values.postgresql.image.repository .Values.postgresql.image.tag | quote }}
+
+  enableSuperuserAccess: {{ .Values.postgresql.enableSuperuserAccess }}
+
+  storage:
+    size: {{ .Values.postgresql.storage.size | quote }}
+    {{- with .Values.postgresql.storage.storageClass }}
+    storageClass: {{ . | quote }}
+    {{- end }}
+
+  resources:
+    requests:
+      cpu: {{ .Values.postgresql.resources.requests.cpu | quote }}
+      memory: {{ .Values.postgresql.resources.requests.memory | quote }}
+    limits:
+      cpu: {{ .Values.postgresql.resources.limits.cpu | quote }}
+      memory: {{ .Values.postgresql.resources.limits.memory | quote }}
+
+  postgresql:
+    parameters:
+      max_connections: "200"
+      shared_buffers: "256MB"
+      random_page_cost: "1.1"
+
+  monitoring:
+    enablePodMonitor: false
+
+  affinity:
+    podAntiAffinityType: required
+    topologyKey: kubernetes.io/hostname
+
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: DatabaseRole
+metadata:
+  name: {{ include "powerdns-poweradmin.fullname" . }}-pdns-role
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "powerdns-poweradmin.labels" . | nindent 4 }}
+spec:
+  cluster:
+    name: {{ include "powerdns-poweradmin.fullname" . }}-postgres
+  name: pdns
+  login: true
+  superuser: false
+  createdb: false
+  createrole: false
+  connectionLimit: 100
+  passwordSecret:
+    name: {{ include "powerdns-poweradmin.pdnsRoleSecretName" . }}
+  databaseRoleReclaimPolicy: retain
+
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: DatabaseRole
+metadata:
+  name: {{ include "powerdns-poweradmin.fullname" . }}-poweradmin-role
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "powerdns-poweradmin.labels" . | nindent 4 }}
+spec:
+  cluster:
+    name: {{ include "powerdns-poweradmin.fullname" . }}-postgres
+  name: poweradmin
+  login: true
+  superuser: false
+  createdb: false
+  createrole: false
+  connectionLimit: 100
+  passwordSecret:
+    name: {{ include "powerdns-poweradmin.poweradminRoleSecretName" . }}
+  databaseRoleReclaimPolicy: retain
+
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: {{ include "powerdns-poweradmin.fullname" . }}-pdns-db
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "powerdns-poweradmin.labels" . | nindent 4 }}
+spec:
+  name: pdns
+  owner: pdns
+  cluster:
+    name: {{ include "powerdns-poweradmin.fullname" . }}-postgres
+
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: {{ include "powerdns-poweradmin.fullname" . }}-poweradmin-db
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "powerdns-poweradmin.labels" . | nindent 4 }}
+spec:
+  name: poweradmin
+  owner: poweradmin
+  cluster:
+    name: {{ include "powerdns-poweradmin.fullname" . }}-postgres
+{{- end }}

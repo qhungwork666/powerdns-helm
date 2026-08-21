@@ -1,0 +1,46 @@
+powerdns:
+  replicas: 2
+  service:
+    type: LoadBalancer
+    externalTrafficPolicy: Local
+  api:
+    allowFrom:
+      - 10.244.0.0/16
+      - 10.245.0.0/16
+
+poweradmin:
+  replicas: 2
+  dns:
+    ns1: ns1.example.com
+    ns2: ns2.example.com
+    hostmaster: hostmaster.example.com
+
+postgresql:
+  instances: 3
+  storage:
+    size: 50Gi
+    storageClass: local-path
+  roles:
+    pdns:
+      existingSecret: powerdns-poweradmin-pdns-db
+    poweradmin:
+      existingSecret: powerdns-poweradmin-poweradmin-db
+
+secrets:
+  existingSecret: powerdns-poweradmin-credentials
+  admin:
+    username: admin
+    email: admin@example.com
+    fullname: DNS Administrator
+
+gateway:
+  enabled: true
+  existingGateway:
+    name: public-gateway
+    namespace: envoy-gateway-system
+    sectionName: https
+  hostname: poweradmin.example.com
+
+networkPolicy:
+  enabled: true
+  gatewayNamespace: envoy-gateway-system
